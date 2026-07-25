@@ -1,0 +1,112 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ===== Virtual environments =====
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ===== Environment / secrets =====
+.env
+.env.*
+*.env
+config.local.*
+
+# ===== ML / DL model files & weights =====
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.h5
+*.hdf5
+*.onnx
+*.tflite
+*.pb
+*.model
+*.pkl
+*.pickle
+*.joblib
+*.gguf
+*.ggml
+*.npz
+*.npy
+
+# ===== SLM / LLM specific =====
+models/
+checkpoints/
+weights/
+*.gguf
+*.safetensors
+tokenizer.json
+tokenizer_config.json
+*.spm
+adapters/
+lora_weights/
+merged_model/
+
+# ===== Datasets / large data =====
+data/
+datasets/
+*.csv
+*.tsv
+*.parquet
+*.arrow
+*.jsonl
+raw_data/
+processed_data/
+
+# ===== Logs / experiment tracking =====
+logs/
+runs/
+wandb/
+mlruns/
+lightning_logs/
+tensorboard/
+*.log
+
+# ===== Cache =====
+.cache/
+*.cache
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ===== OS / editor =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ===== Distribution / packaging =====
+*.tar.gz
+*.zip
