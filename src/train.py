@@ -54,8 +54,30 @@ def format_instruction_text(example: dict, tokenizer: AutoTokenizer) -> str:
         f"<|im_start|>assistant\n{response}<|im_end|>"
     )
 
+def require_cuda():
+    """Hard-fails if no NVIDIA GPU is visible to torch, instead of silently
+    falling back to CPU training."""
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "[FATAL] No CUDA-capable NVIDIA GPU detected by torch.cuda.is_available().\n"
+            "This script is configured to train on GPU only. Checklist:\n"
+            "  1. Confirm the machine actually has an NVIDIA GPU: run `nvidia-smi`.\n"
+            "  2. Confirm your PyTorch build has CUDA support: "
+            "`python -c \"import torch; print(torch.__version__, torch.version.cuda)\"` "
+            "should NOT print 'None' for cuda.\n"
+            "  3. If you installed the CPU-only torch wheel, reinstall a CUDA build, e.g.:\n"
+            "     pip install torch --index-url https://download.pytorch.org/whl/cu121\n"
+            "  4. If running in Docker, make sure the container was started with --gpus all "
+            "and nvidia-container-toolkit is installed on the host.\n"
+        )
+    device_count = torch.cuda.device_count()
+    gpu_name = torch.cuda.get_device_name(0)
+    print(f"[*] CUDA is available. Found {device_count} GPU(s). Using device 0: {gpu_name}")
+
 def train(config_path: str):
-    """Executes QLoRA SFT Training Loop for Qwen2.5-0.5B-Instruct."""
+    """Executes QLoRA SFT Training Loop for Qwen2.5-0.5B-Instruct on NVIDIA GPU."""
+    require_cuda()
+
     cfg = load_yaml_config(config_path)
 
     model_cfg = cfg["model"]
@@ -72,47 +94,29 @@ def train(config_path: str):
         }
     )
 
-    is_cuda_available = torch.cuda.is_available()
-    print(f"[*] CUDA Available: {is_cuda_available}")
-
     base_model_name = model_cfg["base_model_name_or_path"]
     print(f"[*] Loading Base Model Tokenizer: {base_model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    if is_cuda_available:
-        print(f"[*] Configuring 4-bit Quantization (BitsAndBytes)...")
-        try:
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=model_cfg.get("load_in_4bit", True),
-                bnb_4bit_quant_type=model_cfg.get("bnb_4bit_quant_type", "nf4"),
-                bnb_4bit_compute_dtype=getattr(torch, model_cfg.get("bnb_4bit_compute_dtype", "bfloat16")),
-                bnb_4bit_use_double_quant=model_cfg.get("bnb_4bit_use_double_quant", True)
-            )
-            print(f"[*] Loading Base Model: {base_model_name} on CUDA...")
-            model = AutoModelForCausalLM.from_pretrained(
-                base_model_name,
-                quantization_config=bnb_config,
-                device_map="auto",
-                trust_remote_code=True
-            )
-            model = prepare_model_for_kbit_training(model)
-        except Exception as e:
-            print(f"[!] Quantization load failed ({e}), loading standard FP16/BF16 model...")
-            model = AutoModelForCausalLM.from_pretrained(
-                base_model_name,
-                torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
-                device_map="auto",
-                trust_remote_code=True
-            )
-    else:
-        print(f"[*] Loading Base Model on CPU: {base_model_name}...")
-        model = AutoModelForCausalLM.from_pretrained(
-            base_model_name,
-            dtype=torch.float32,
-            trust_remote_code=True
-        )
+    print(f"[*] Configuring 4-bit Quantization (BitsAndBytes)...")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=model_cfg.get("load_in_4bit", True),
+        bnb_4bit_quant_type=model_cfg.get("bnb_4bit_quant_type", "nf4"),
+        bnb_4bit_compute_dtype=getattr(torch, model_cfg.get("bnb_4bit_compute_dtype", "bfloat16")),
+        bnb_4bit_use_double_quant=model_cfg.get("bnb_4bit_use_double_quant", True)
+    )
+    print(f"[*] Loading Base Model: {base_model_name} on CUDA...")
+    # NOTE: no silent try/except fallback here anymore. If quantized loading
+    # fails, the script raises the real error instead of quietly retrying on CPU.
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model_name,
+        quantization_config=bnb_config,
+        device_map="auto",
+        trust_remote_code=True
+    )
+    model = prepare_model_for_kbit_training(model)
 
     print(f"[*] Configuring LoRA Adapters...")
     peft_config = LoraConfig(
@@ -142,7 +146,10 @@ def train(config_path: str):
         "save_steps": train_cfg["save_steps"],
         "save_total_limit": train_cfg["save_total_limit"],
         "gradient_checkpointing": train_cfg.get("gradient_checkpointing", False),
-        "report_to": "none"
+        "report_to": "none",
+        "bf16": train_cfg.get("bf16", False),
+        "fp16": train_cfg.get("fp16", False),
+        "optim": train_cfg.get("optim", "paged_adamw_8bit"),
     }
 
     # Handle eval strategy parameter name across transformers versions
@@ -151,14 +158,6 @@ def train(config_path: str):
         kwargs["eval_strategy"] = eval_strat
     else:
         kwargs["evaluation_strategy"] = eval_strat
-
-    if is_cuda_available:
-        kwargs["bf16"] = train_cfg.get("bf16", False)
-        kwargs["fp16"] = train_cfg.get("fp16", False)
-        kwargs["optim"] = train_cfg.get("optim", "paged_adamw_8bit")
-    else:
-        kwargs["use_cpu"] = True
-        kwargs["optim"] = "adamw_torch"
 
     training_args = TrainingArguments(**kwargs)
 
@@ -219,7 +218,7 @@ def train(config_path: str):
 
         trainer = Trainer(**trainer_kwargs)
 
-    print(f"[*] Starting Fine-Tuning Training Loop for LoopLens SLM...")
+    print(f"[*] Starting Fine-Tuning Training Loop for LoopLens SLM on GPU...")
     trainer.train()
 
     final_adapter_path = os.path.join(train_cfg["output_dir"], "final_adapter")
@@ -229,7 +228,7 @@ def train(config_path: str):
     tokenizer.save_pretrained(final_adapter_path)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="LoopLens QLoRA Trainer")
+    parser = argparse.ArgumentParser(description="LoopLens QLoRA Trainer (GPU-only)")
     parser.add_argument("--config", type=str, default="configs/qlora_config.yaml", help="Path to config file")
     args = parser.parse_args()
 
