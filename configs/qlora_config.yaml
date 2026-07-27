@@ -1,7 +1,7 @@
 # QLoRA Fine-Tuning Configuration for LoopLens SLM Engine
 
 model:
-  base_model_name_or_path: "microsoft/Phi-3.5-mini-instruct"  # Alternative: "Qwen/Qwen2.5-7B-Instruct" or "meta-llama/Meta-Llama-3-8B-Instruct"
+  base_model_name_or_path: "Qwen/Qwen2.5-0.5B-Instruct"
   load_in_4bit: true
   bnb_4bit_compute_dtype: "bfloat16"
   bnb_4bit_quant_type: "nf4"
@@ -25,8 +25,7 @@ lora:
 data:
   train_file: "data/processed/train.jsonl"
   val_file: "data/processed/val.jsonl"
-  taxonomy_file: "data/taxonomy_hierarchy.json"
-  max_seq_length: 2048
+  max_seq_length: 1024
 
 training:
   output_dir: "outputs/qlora_adapter"
@@ -41,10 +40,10 @@ training:
   logging_steps: 10
   eval_steps: 50
   save_steps: 100
-  save_total_limit: 3
+  save_total_limit: 2
   evaluation_strategy: "steps"
   fp16: false
   bf16: true
   gradient_checkpointing: true
   optim: "paged_adamw_8bit"
-  report_to: "tensorboard"
+  report_to: "none"
